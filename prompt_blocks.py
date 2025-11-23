@@ -1,16 +1,20 @@
 import flet as ft
 
 class PromptBlock(ft.Column):
-    def __init__(self, tag_name: str, delete_callback, parent_focus_callback, text_change_callback, border_color: str, indent_level: int = 1):
+    def __init__(self, tag_name: str, delete_callback, parent_focus_callback, text_change_callback, 
+                 save_request_callback, snippet_request_callback, on_focus_callback, # NEW CALLBACK
+                 border_color: str, indent_level: int = 1):
         super().__init__()
         self.tag_name = tag_name
         self.delete_callback = delete_callback
         self.parent_focus_callback = parent_focus_callback
-        self.text_change_callback = text_change_callback # New callback
+        self.text_change_callback = text_change_callback
+        self.save_request_callback = save_request_callback
+        self.snippet_request_callback = snippet_request_callback
+        self.on_focus_callback = on_focus_callback # Store the tracker
+        
         self.border_color = border_color
         self.indent_level = indent_level
-        
-        # Indent logic
         self.left_margin = (self.indent_level - 1) * 40
 
         self.content_field = ft.TextField(
@@ -24,7 +28,8 @@ class PromptBlock(ft.Column):
             hint_text=f"// Enter {tag_name} data...",
             hint_style=ft.TextStyle(color=ft.colors.GREEN_900, font_family="Courier New"),
             on_submit=self.handle_shift_enter,
-            on_change=lambda e: self.text_change_callback(), # Trigger calculation on every keystroke
+            on_change=lambda e: self.text_change_callback(),
+            on_focus=lambda e: self.on_focus_callback(self), # Report I am active
             shift_enter=True,
         )
 
@@ -36,6 +41,7 @@ class PromptBlock(ft.Column):
                 # Header Row
                 ft.Row(
                     controls=[
+                        # Left: Tag Name
                         ft.Container(
                             content=ft.Text(
                                 self.tag_name.upper(), 
@@ -48,12 +54,25 @@ class PromptBlock(ft.Column):
                             padding=ft.padding.symmetric(horizontal=10, vertical=4),
                             border_radius=0, 
                         ),
-                        ft.IconButton(
-                            icon=ft.icons.CLOSE_SHARP, 
-                            icon_size=18, 
-                            icon_color=self.border_color,
-                            tooltip="DELETE_BLOCK",
-                            on_click=lambda _: self.delete_callback(self)
+                        # Right: Actions (Save + Delete)
+                        ft.Row(
+                            controls=[
+                                ft.IconButton(
+                                    icon=ft.icons.SAVE, 
+                                    icon_size=18, 
+                                    icon_color=self.border_color,
+                                    tooltip="SAVE SNIPPET",
+                                    on_click=lambda _: self.save_request_callback(self)
+                                ),
+                                ft.IconButton(
+                                    icon=ft.icons.CLOSE_SHARP, 
+                                    icon_size=18, 
+                                    icon_color=self.border_color,
+                                    tooltip="DELETE BLOCK",
+                                    on_click=lambda _: self.delete_callback(self)
+                                )
+                            ],
+                            spacing=0
                         )
                     ],
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN
@@ -80,6 +99,6 @@ class PromptBlock(ft.Column):
 
     def handle_shift_enter(self, e):
         self.parent_focus_callback()
-
+        
     def focus(self):
         self.content_field.focus()

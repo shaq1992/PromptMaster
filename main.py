@@ -1,5 +1,6 @@
 import flet as ft
 from prompt_blocks import PromptBlock
+from snippet_manager import SnippetManager
 import math
 
 def main(page: ft.Page):
@@ -10,7 +11,8 @@ def main(page: ft.Page):
     page.window_width = 800
     page.window_height = 900
     
-    # Retro Palette
+    snippet_mgr = SnippetManager()
+    
     NEON_COLORS = {
         "role":        ft.colors.CYAN_400,
         "context":     ft.colors.PINK_500,
@@ -22,7 +24,13 @@ def main(page: ft.Page):
         "default":     ft.colors.WHITE
     }
     
-    app_state = {"last_main_key": "default"}
+    app_state = {
+        "last_main_key": "default",
+        "temp_save_block": None, 
+        "active_snippet_block": None,
+        "focused_block": None # Tracks which block the user is currently typing in
+    }
+    
     COMMANDS = {
         "role": "ROLE", "context": "CONTEXT", "task": "TASK",
         "constraints": "CONSTRAINTS", "output": "OUTPUT",
@@ -31,7 +39,6 @@ def main(page: ft.Page):
 
     # --- 2. UI Components ---
     
-    # Header
     header_title = ft.Text("PROMPT MASTER", size=50, weight="bold", color=ft.colors.CYAN_300, font_family="Courier New", text_align="center")
     header_tagline = ft.Text("ARCHITECT YOUR AI INTERACTIONS", size=16, color=ft.colors.PINK_300, font_family="Courier New", italic=True, text_align="center")
     
@@ -47,7 +54,6 @@ def main(page: ft.Page):
         animate=ft.animation.Animation(500, "easeOutCubic"), 
     )
 
-    # Workspace
     blocks_column = ft.Column(scroll=ft.ScrollMode.HIDDEN, expand=True)
 
     suggestion_list = ft.ListView(height=0, spacing=2, padding=0)
@@ -78,15 +84,7 @@ def main(page: ft.Page):
         border_radius=0 
     )
 
-    # --- 3. Token Counter UI ---
-    token_text = ft.Text(
-        "[Token Count: 0]", 
-        font_family="Courier New", 
-        color=ft.colors.GREEN_400, 
-        size=16, 
-        weight="bold"
-    )
-
+    token_text = ft.Text("[Token Count: 0]", font_family="Courier New", color=ft.colors.GREEN_400, size=16, weight="bold")
     token_container = ft.Container(
         content=token_text,
         padding=ft.padding.symmetric(horizontal=15, vertical=10),
@@ -94,46 +92,53 @@ def main(page: ft.Page):
         bgcolor=ft.colors.BLACK,
     )
 
-    # --- 4. The Copy Button (Moved inside layout) ---
     copy_button = ft.ElevatedButton(
-        text="COPY PROMPT",
-        icon=ft.icons.COPY,
-        bgcolor=ft.colors.PINK_600,
-        color=ft.colors.WHITE,
-        style=ft.ButtonStyle(
-            shape=ft.RoundedRectangleBorder(radius=0), # Retro Square
-            padding=20,
-        ),
+        text="COPY PROMPT", icon=ft.icons.COPY, bgcolor=ft.colors.PINK_600, color=ft.colors.WHITE,
+        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=0), padding=20),
         on_click=lambda e: copy_to_clipboard(e)
     )
 
-    # Group Token Counter and Button together
     bottom_actions_row = ft.Row(
-        controls=[
-            token_container,
-            ft.Container(width=10), # Gap between count and button
-            copy_button
-        ],
+        controls=[token_container, ft.Container(width=10), copy_button],
         alignment=ft.MainAxisAlignment.END,
-        visible=False # Hidden initially
+        visible=False 
+    )
+    
+    # --- 3. Save Dialog ---
+    snippet_name_field = ft.TextField(
+        label="SNIPPET_NAME",
+        autofocus=True,
+        bgcolor=ft.colors.BLACK,
+        color=ft.colors.GREEN_400,
+        border_color=ft.colors.GREEN_400,
+        text_style=ft.TextStyle(font_family="Courier New"),
+        on_submit=lambda e: finalize_save_snippet()
+    )
+    
+    save_dialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("SAVE SNIPPET TO LIBRARY", font_family="Courier New", color=ft.colors.CYAN_400),
+        content=ft.Container(height=80, content=snippet_name_field),
+        actions=[
+            ft.TextButton("CANCEL", on_click=lambda e: close_dialog()),
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+        bgcolor=ft.colors.GREY_900,
+        shape=ft.RoundedRectangleBorder(radius=0)
     )
 
-    # --- 5. Logic Functions ---
+    # --- 4. Logic Functions ---
 
     def calculate_tokens():
-        """Iterates through all blocks and sums length"""
         total_chars = 0
         for block in blocks_column.controls:
             total_chars += len(block.content_field.value)
-        
-        # Standard estimation: 1 token ~= 4 chars
         est_tokens = math.ceil(total_chars / 4)
         token_text.value = f"[Token Count: {est_tokens}]"
         page.update()
 
     def toggle_ui_state():
         has_items = len(blocks_column.controls) > 0
-        
         if has_items:
             header_container.height = 120 
             header_title.size = 28
@@ -143,16 +148,12 @@ def main(page: ft.Page):
             header_container.height = 300 
             header_title.size = 50
             header_tagline.size = 16
-        
-        # Toggle The entire Bottom Row
         bottom_actions_row.visible = has_items
-        
         page.update()
 
     def generate_nested_xml():
         xml_output = []
         stack = [] 
-
         for block in blocks_column.controls:
             current_level = block.indent_level
             tag = block.tag_name.lower().replace(" ", "_")
@@ -165,19 +166,16 @@ def main(page: ft.Page):
 
             indent_str = "  " * len(stack)
             xml_output.append(f"{indent_str}<{tag}>")
-            
             if content:
                 content_indent = indent_str + "  "
                 formatted_content = "\n".join([f"{content_indent}{line}" for line in content.splitlines()])
                 xml_output.append(formatted_content)
-
             stack.append((tag, current_level))
 
         while stack:
             closing_tag, _ = stack.pop()
             indent = "  " * len(stack)
             xml_output.append(f"{indent}</{closing_tag}>")
-
         return "\n".join(xml_output)
 
     def copy_to_clipboard(e):
@@ -189,11 +187,114 @@ def main(page: ft.Page):
 
     def delete_block(block_instance):
         blocks_column.controls.remove(block_instance)
+        # Clear focused block if deleted
+        if app_state["focused_block"] == block_instance:
+            app_state["focused_block"] = None
         calculate_tokens()
         toggle_ui_state()
 
+    # --- Snippet Logic ---
+
+    def track_focus(block_instance):
+        """Updates which block is currently active"""
+        app_state["focused_block"] = block_instance
+
+    def handle_keyboard_events(e: ft.KeyboardEvent):
+        """Global listener for shortcuts"""
+        # Check for Ctrl + Space
+        if e.ctrl and e.key == " ":
+            block = app_state["focused_block"]
+            if block:
+                initiate_load_snippet(block)
+
+    def initiate_save_snippet(block_instance):
+        content = block_instance.content_field.value.strip()
+        if not content:
+            page.snack_bar = ft.SnackBar(ft.Text("ERROR: BLOCK_EMPTY", font_family="Courier New"))
+            page.snack_bar.open = True
+            page.update()
+            return
+            
+        app_state["temp_save_block"] = block_instance
+        snippet_name_field.value = "" 
+        page.dialog = save_dialog
+        save_dialog.open = True
+        page.update()
+
+    def finalize_save_snippet():
+        name = snippet_name_field.value.strip()
+        block = app_state["temp_save_block"]
+        
+        if name and block:
+            success = snippet_mgr.save_snippet(
+                section_tag=block.tag_name, 
+                name=name, 
+                content=block.content_field.value
+            )
+            if success:
+                page.snack_bar = ft.SnackBar(ft.Text(f"SNIPPET '{name}' SAVED!", font_family="Courier New"))
+            else:
+                page.snack_bar = ft.SnackBar(ft.Text("ERROR_SAVING_SNIPPET", font_family="Courier New"))
+        
+        close_dialog()
+        page.snack_bar.open = True
+        page.update()
+
+    def close_dialog():
+        save_dialog.open = False
+        page.update()
+
+    def insert_snippet(content):
+        block = app_state["active_snippet_block"]
+        if block:
+            current_text = block.content_field.value
+            if current_text:
+                block.content_field.value = current_text + "\n" + content
+            else:
+                block.content_field.value = content
+            
+            block.focus()
+            suggestion_container.visible = False
+            calculate_tokens()
+            page.update()
+
+    def initiate_load_snippet(block_instance):
+        app_state["active_snippet_block"] = block_instance
+        tag = block_instance.tag_name
+        
+        snippets = snippet_mgr.load_snippets(tag)
+        
+        if snippets:
+            suggestion_container.visible = True
+            suggestion_list.controls.clear()
+            suggestion_list.height = min(len(snippets) * 45, 200)
+            
+            color = block_instance.border_color
+            
+            for snip in snippets:
+                suggestion_list.controls.append(
+                    ft.Container(
+                        content=ft.Row([
+                            ft.Icon(ft.icons.FLASH_ON, color=color, size=16),
+                            ft.Text(snip['name'], size=16, color=ft.colors.GREEN_50, font_family="Courier New"),
+                            ft.Text(f"[{len(snip['content'])} chars]", size=12, color=ft.colors.GREY_500, font_family="Courier New")
+                        ]),
+                        padding=10,
+                        on_click=lambda _, c=snip['content']: insert_snippet(c),
+                        ink=True,
+                        bgcolor=ft.colors.BLACK
+                    )
+                )
+        else:
+             page.snack_bar = ft.SnackBar(ft.Text("NO_SNIPPETS_FOUND_FOR_SECTION", font_family="Courier New"))
+             page.snack_bar.open = True
+        
+        page.update()
+
     def focus_command_bar():
         command_input.focus()
+        # Reset focused block since we are now in command bar
+        app_state["focused_block"] = None 
         page.update()
 
     def add_block(tag_input, level):
@@ -203,10 +304,8 @@ def main(page: ft.Page):
                 if tag_input.lower() == k:
                     key_found = k
                     break
-            
             current_key = key_found if key_found else "default"
             app_state["last_main_key"] = current_key
-            
             display_tag = COMMANDS.get(current_key, tag_input.upper())
             color = NEON_COLORS.get(current_key, NEON_COLORS["default"])
         else:
@@ -220,6 +319,9 @@ def main(page: ft.Page):
             delete_callback=delete_block,
             parent_focus_callback=focus_command_bar,
             text_change_callback=calculate_tokens,
+            save_request_callback=initiate_save_snippet,
+            snippet_request_callback=initiate_load_snippet,
+            on_focus_callback=track_focus, # PASS THE FOCUS TRACKER
             indent_level=level
         )
         
@@ -229,11 +331,12 @@ def main(page: ft.Page):
         
         toggle_ui_state()
         new_block.focus()
+        # Manually set focus state because programmatic focus doesn't always trigger on_focus
+        app_state["focused_block"] = new_block 
         calculate_tokens()
 
     def on_input_change(e):
         val = command_input.value.strip().lower()
-        
         if val.startswith("/") and not val.startswith("//"):
             search_term = val[1:] 
             matches = [k for k in COMMANDS.keys() if k.startswith(search_term)]
@@ -242,7 +345,6 @@ def main(page: ft.Page):
                 suggestion_container.visible = True
                 suggestion_list.controls.clear()
                 suggestion_list.height = min(len(matches) * 45, 200)
-                
                 for m in matches:
                     color = NEON_COLORS[m]
                     suggestion_list.controls.append(
@@ -262,7 +364,6 @@ def main(page: ft.Page):
                 suggestion_container.visible = False
         else:
             suggestion_container.visible = False
-        
         page.update()
 
     def execute_command():
@@ -272,11 +373,9 @@ def main(page: ft.Page):
         if val.startswith("///"):
             custom_tag = val[3:].strip()
             if custom_tag: add_block(custom_tag, 3)
-        
         elif val.startswith("//"):
             custom_tag = val[2:].strip()
             if custom_tag: add_block(custom_tag, 2)
-        
         elif val.startswith("/"):
             if suggestion_container.visible and suggestion_list.controls:
                 search_term = val[1:].lower()
@@ -287,6 +386,9 @@ def main(page: ft.Page):
                 if custom_tag: add_block(custom_tag, 1)
 
     command_input.on_change = on_input_change
+    
+    # --- Register Global Events ---
+    page.on_keyboard_event = handle_keyboard_events
 
     # --- 6. Layout ---
     main_layout = ft.Container(
@@ -306,8 +408,7 @@ def main(page: ft.Page):
                     ft.Text(">", size=20, color=ft.colors.GREEN_400, font_family="Courier New", weight="bold"),
                     command_input
                 ], alignment=ft.MainAxisAlignment.CENTER),
-                # Bottom Action Bar
-                ft.Container(height=10), # Margin
+                ft.Container(height=10),
                 bottom_actions_row
             ],
             spacing=0
