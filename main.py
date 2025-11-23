@@ -1,7 +1,6 @@
 import flet as ft
 from prompt_blocks import PromptBlock
 from snippet_manager import SnippetManager
-# --- NEW IMPORT ---
 from llm_response import get_response
 import math
 import threading
