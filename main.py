@@ -1,7 +1,10 @@
 import flet as ft
 from prompt_blocks import PromptBlock
 from snippet_manager import SnippetManager
+# --- NEW IMPORT ---
+from llm_response import get_response
 import math
+import threading
 
 def main(page: ft.Page):
     # --- 1. App Configuration ---
@@ -28,7 +31,7 @@ def main(page: ft.Page):
         "last_main_key": "default",
         "temp_save_block": None, 
         "active_snippet_block": None,
-        "focused_block": None # Tracks which block the user is currently typing in
+        "focused_block": None
     }
     
     COMMANDS = {
@@ -187,7 +190,6 @@ def main(page: ft.Page):
 
     def delete_block(block_instance):
         blocks_column.controls.remove(block_instance)
-        # Clear focused block if deleted
         if app_state["focused_block"] == block_instance:
             app_state["focused_block"] = None
         calculate_tokens()
@@ -196,12 +198,9 @@ def main(page: ft.Page):
     # --- Snippet Logic ---
 
     def track_focus(block_instance):
-        """Updates which block is currently active"""
         app_state["focused_block"] = block_instance
 
     def handle_keyboard_events(e: ft.KeyboardEvent):
-        """Global listener for shortcuts"""
-        # Check for Ctrl + Space
         if e.ctrl and e.key == " ":
             block = app_state["focused_block"]
             if block:
@@ -293,7 +292,6 @@ def main(page: ft.Page):
 
     def focus_command_bar():
         command_input.focus()
-        # Reset focused block since we are now in command bar
         app_state["focused_block"] = None 
         page.update()
 
@@ -321,7 +319,7 @@ def main(page: ft.Page):
             text_change_callback=calculate_tokens,
             save_request_callback=initiate_save_snippet,
             snippet_request_callback=initiate_load_snippet,
-            on_focus_callback=track_focus, # PASS THE FOCUS TRACKER
+            on_focus_callback=track_focus,
             indent_level=level
         )
         
@@ -331,13 +329,15 @@ def main(page: ft.Page):
         
         toggle_ui_state()
         new_block.focus()
-        # Manually set focus state because programmatic focus doesn't always trigger on_focus
         app_state["focused_block"] = new_block 
         calculate_tokens()
+        
+        # --- RETURN THE BLOCK (Crucial for AI Injection) ---
+        return new_block
 
     def on_input_change(e):
         val = command_input.value.strip().lower()
-        if val.startswith("/") and not val.startswith("//"):
+        if val.startswith("/") and not val.startswith("//") and not val.startswith("/forge"):
             search_term = val[1:] 
             matches = [k for k in COMMANDS.keys() if k.startswith(search_term)]
             
@@ -366,9 +366,73 @@ def main(page: ft.Page):
             suggestion_container.visible = False
         page.update()
 
+    # --- AI FUNCTIONS ---
+    def run_forge(archetype_text):
+        """Runs in a separate thread to prevent UI freezing"""
+        try:
+            # 1. Construct the Meta-Prompt
+            system_prompt = f"""
+            Act as an expert Prompt Engineer.
+            Generate a detailed, high-quality System Role (Persona) based on this brief description: "{archetype_text}".
+            
+            Requirements:
+            1. Start directly with "You are..."
+            2. Define the Tone, Style, and Philosophy of the persona.
+            3. Keep it under 150 words.
+            4. Be specific and distinct.
+            """
+            
+            # 2. Call the API
+            generated_role = get_response(system_prompt)
+            
+            # 3. Create Block & Inject (Must be done on Main Thread via page.run_task ideally, 
+            # but Flet handles UI updates from threads reasonably well if we don't create controls in thread)
+            # We will use a helper to update UI safely
+            page.run_thread(lambda: inject_forge_result(generated_role))
+            
+        except Exception as e:
+            print(f"Forge Error: {e}")
+            command_input.value = "ERROR: FORGE_FAILED"
+            command_input.disabled = False
+            page.update()
+
+    def inject_forge_result(text):
+        """Called after API returns"""
+        # Create the ROLE block
+        new_block = add_block("role", 1)
+        
+        # Inject text
+        new_block.content_field.value = text.strip()
+        
+        # Reset UI
+        command_input.disabled = False
+        command_input.value = ""
+        command_input.hint_text = "TYPE / TO INITIATE..."
+        command_input.update()
+        
+        # Update Tokens
+        calculate_tokens()
+        page.update()
+
+
     def execute_command():
         val = command_input.value.strip()
         if not val: return
+
+        # --- NEW: FORGE COMMAND ---
+        if val.startswith("/forge "):
+            # Extract the archetype text (remove '/forge ' which is 7 chars)
+            archetype = val[7:].strip().replace('"', '') # Strip quotes if user used them
+            if archetype:
+                # UI Feedback
+                command_input.value = "INITIALIZING NEURAL LINK..."
+                command_input.disabled = True
+                page.update()
+                
+                # Run API call in background thread so app doesn't freeze
+                threading.Thread(target=run_forge, args=(archetype,), daemon=True).start()
+            return
+        # ---------------------------
 
         if val.startswith("///"):
             custom_tag = val[3:].strip()
@@ -386,11 +450,8 @@ def main(page: ft.Page):
                 if custom_tag: add_block(custom_tag, 1)
 
     command_input.on_change = on_input_change
-    
-    # --- Register Global Events ---
     page.on_keyboard_event = handle_keyboard_events
 
-    # --- 6. Layout ---
     main_layout = ft.Container(
         gradient=ft.LinearGradient(
             begin=ft.alignment.top_center,
