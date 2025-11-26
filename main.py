@@ -1,6 +1,6 @@
 import flet as ft
 from prompt_blocks import PromptBlock
-from snippet_manager import SnippetManager
+from snippet_manager import SnippetManager 
 from llm_response import get_response
 import math
 import threading
@@ -23,7 +23,8 @@ def main(page: ft.Page):
         "output":      ft.colors.PURPLE_400,
         "format":      ft.colors.TEAL_400,
         "examples":    ft.colors.AMBER_400,
-        "default":     ft.colors.WHITE
+        "default":     ft.colors.WHITE,
+        "feedback":    ft.colors.GREEN_300
     }
     
     app_state = {
