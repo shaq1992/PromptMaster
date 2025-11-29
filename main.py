@@ -95,6 +95,7 @@ def main(page: ft.Page):
         bgcolor=ft.colors.BLACK,
     )
 
+
     copy_button = ft.ElevatedButton(
         text="COPY PROMPT", icon=ft.icons.COPY, bgcolor=ft.colors.PINK_600, color=ft.colors.WHITE,
         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=0), padding=20),
