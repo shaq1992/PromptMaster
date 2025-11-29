@@ -5,7 +5,6 @@ load_dotenv()
 
 def get_response(prompt):
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-    
     config = {
         "temperature": 0.1,
         "top_p": 0.9,
@@ -23,7 +22,6 @@ def get_response(prompt):
         contents=prompt,
         config=config
     )
-
     return response.text
 
-# print(get_response("Can you hear me?"))
+# print(get_response("Tell me a joke"))
