@@ -96,6 +96,15 @@ def main(page: ft.Page):
     )
 
 
+    clear_button = ft.ElevatedButton(
+        text="CLEAR", 
+        icon=ft.icons.DELETE_SWEEP, 
+        bgcolor=ft.colors.RED_900, 
+        color=ft.colors.WHITE,
+        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=0), padding=20),
+        on_click=lambda e: open_clear_dialog()
+    )
+
     copy_button = ft.ElevatedButton(
         text="COPY PROMPT", icon=ft.icons.COPY, bgcolor=ft.colors.PINK_600, color=ft.colors.WHITE,
         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=0), padding=20),
@@ -103,7 +112,13 @@ def main(page: ft.Page):
     )
 
     bottom_actions_row = ft.Row(
-        controls=[token_container, ft.Container(width=10), copy_button],
+        controls=[
+            clear_button, 
+            ft.Container(width=10), 
+            token_container, 
+            ft.Container(width=10), 
+            copy_button
+        ],
         alignment=ft.MainAxisAlignment.END,
         visible=False 
     )
@@ -130,6 +145,36 @@ def main(page: ft.Page):
         bgcolor=ft.colors.GREY_900,
         shape=ft.RoundedRectangleBorder(radius=0)
     )
+
+    # --- Clear Confirmation Dialog ---
+    def close_clear_dialog(e=None):
+        clear_dialog.open = False
+        page.update()
+
+    def perform_clear(e=None):
+        blocks_column.controls.clear()
+        app_state["focused_block"] = None
+        calculate_tokens()
+        toggle_ui_state()
+        close_clear_dialog()
+
+    clear_dialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("RESET WORKSPACE?", font_family="Courier New", color=ft.colors.RED_400),
+        content=ft.Text("IRREVERSIBLE ACTION.\nCONFIRM DELETE ALL BLOCKS?", font_family="Courier New"),
+        actions=[
+            ft.TextButton("CANCEL", on_click=close_clear_dialog),
+            ft.TextButton("CONFIRM", on_click=perform_clear, style=ft.ButtonStyle(color=ft.colors.RED_400)),
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+        bgcolor=ft.colors.GREY_900,
+        shape=ft.RoundedRectangleBorder(radius=0)
+    )
+
+    def open_clear_dialog():
+        page.dialog = clear_dialog
+        clear_dialog.open = True
+        page.update()
 
     # --- 4. Logic Functions ---
 
@@ -202,6 +247,15 @@ def main(page: ft.Page):
         app_state["focused_block"] = block_instance
 
     def handle_keyboard_events(e: ft.KeyboardEvent):
+        # Handle Dialog Shortcut
+        if clear_dialog.open:
+            if e.key == "Enter":
+                perform_clear()
+            elif e.key == "Escape":
+                close_clear_dialog()
+            return
+
+        # Existing Shortcuts
         if e.ctrl and e.key == " ":
             block = app_state["focused_block"]
             if block:
